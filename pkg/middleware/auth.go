@@ -23,13 +23,13 @@ func VerifyCookie(key string, r *http.Request) (string, error) {
 
 	session, err := base64.StdEncoding.DecodeString(ck.Value)
 	if err != nil {
-		log.Printf("invalid cookie encoding: %#v", err)
+		log.Printf("cookie-auth: invalid encoding: %#v", err)
 		return "", err
 	}
 
 	i := bytes.LastIndexByte(session, '.')
 	if i < 0 {
-		return "", errors.New("invalid cookie format")
+		return "", errors.New("cookie-auth: invalid cookie format; expected $sig.$user")
 	}
 
 	sign := session[:i]
@@ -38,10 +38,9 @@ func VerifyCookie(key string, r *http.Request) (string, error) {
 	mac := hmac.New(sha256.New, []byte(key))
 	mac.Write([]byte(user))
 	expected := mac.Sum(nil)
-	log.Printf("sig=%#v, user=%#v, key=%#v", sign, user, key)
 
 	if !hmac.Equal(sign, expected) {
-		return "", errors.New("invalid cookie signature")
+		return "", errors.New("cookie-auth: invalid signature")
 	}
 	return user, nil
 }
@@ -56,19 +55,19 @@ func VerifyBasic(key string, r *http.Request, db *d2.SQLite) (string, error) {
 
 	credsB, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(auth, "Basic "))
 	if err != nil {
-		log.Printf("invalid basic encoding: %#v", err)
+		log.Printf("basic-auth: invalid encoding: %#v", err)
 		return "", err
 	}
 	parts := strings.SplitN(string(credsB), ":", 2)
 	if len(parts) != 2 {
 
-		return "", errors.New("malformed basic credentials")
+		return "", errors.New("basic-auth: malformed credentials; expected $user:$pass")
 	}
 	user := parts[0]
 	pass := parts[1]
 
 	if !db.CheckUserPassword(user, pass) {
-		return "", errors.New("invalid username or password")
+		return "", errors.New("basic-auth: invalid username or password")
 	}
 
 	return user, nil
@@ -83,14 +82,8 @@ func Verify(key string, noAuth bool, db *d2.SQLite) func(http.Handler) http.Hand
 				return
 			}
 
-//            for name, values := range r.Header {
-//                for _, value := range values {
-//                    log.Printf(name, value)
-//                }
-//            }
 			user, err := VerifyCookie(key, r)
 			if err != nil {
-				log.Printf("cookie auth failed, falling back to basic")
 				user, err = VerifyBasic(key, r, db)
 			}
 			if err != nil {
@@ -105,7 +98,7 @@ func Verify(key string, noAuth bool, db *d2.SQLite) func(http.Handler) http.Hand
 				}
 			}
 
-			log.Printf("user %s logged in successfully", user)
+			_ = user
 
 			next.ServeHTTP(w, r)
 		}
